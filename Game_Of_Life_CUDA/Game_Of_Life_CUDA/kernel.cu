@@ -23,7 +23,10 @@ __device__ uint8_t dev_image[X * Y * 4];
 bool hst_field[X][Y];
 uint8_t hst_image[X * Y * 4];
 
-
+__global__ void ResetNeighbourTable()
+{
+	dev_neighbours[blockIdx.x][blockIdx.y] = 0;
+}
 __global__ void CalculateCellNeighbours()
 {
 	__shared__ bool shr_neighbours[3][3];
@@ -41,6 +44,7 @@ __global__ void CalculateCellNeighbours()
 	//SETUP
 	if (threadIdx.x == 0 && threadIdx.y == 0)
 	{
+		//std::fill(dev_neighbours, dev_neighbours + X * Y, 0);
 		edge = false;
 
 		if (blockIdx.x == 0)
@@ -90,14 +94,15 @@ __global__ void CalculateCellNeighbours()
 			
 	}
 	__syncthreads();
+
+	//NO SELFREPORT
 	if (threadIdx.x == 0 && threadIdx.y == 0)
 	{
-
 		shr_neighbours[1][1] = 0;
 	}
 	
 	
-	if (blockIdx.x == 1 && blockIdx.y == 1 && threadIdx.x == 0 && threadIdx.y == 0)
+	/*if (blockIdx.x == 1 && blockIdx.y == 1 && threadIdx.x == 0 && threadIdx.y == 0)
 	{
 		for (size_t i = 0; i < 3; i++)
 		{
@@ -109,12 +114,13 @@ __global__ void CalculateCellNeighbours()
 		}
 
 		printf("------------\n");
-	}
+	}*/
 	__syncthreads();
 
 	//printf("\n%i, %i", blockIdx.x, blockIdx.y);
 
 	atomicAdd(&dev_neighbours[blockIdx.x][blockIdx.y], shr_neighbours[threadIdx.x][threadIdx.y]);
+
 	__syncthreads();
 
 	if (blockIdx.x == 1 && blockIdx.y == 1 && threadIdx.x == 0 && threadIdx.y == 0)
@@ -128,9 +134,27 @@ __global__ void CalculateCellNeighbours()
 			printf("\n");
 		}
 	}
+
+	
+
 }
 
+__global__ void SetNewField()
+{
+	bool alive = dev_field[blockIdx.x][blockIdx.y];
+	int neighbours = dev_neighbours[blockIdx.x][blockIdx.y];
+	if (alive && (neighbours < 1 || neighbours > 3))
+	{
+		dev_field[blockIdx.x][blockIdx.y] = false;
 
+	}
+
+	else if (!alive && neighbours == 3)
+	{
+		dev_field[blockIdx.x][blockIdx.y] = true;
+	}
+	
+}
 
 
 
@@ -196,8 +220,13 @@ int main()
 
 	cudaMemcpyToSymbol(dev_field, hst_field, X * Y * sizeof(bool));
 
-
+	
 	CalculateCellNeighbours << <dim3(X,Y), dim3(3,3) >> > ();
+	SetNewField << <dim3(X,Y), 1 >> > ();
+
+	ResetNeighbourTable << <dim3(X, Y), 1 >> > ();
+	CalculateCellNeighbours << <dim3(X, Y), dim3(3, 3) >> > ();
+	SetNewField << <dim3(X, Y), 1 >> > ();
 
 	cudaMemcpyFromSymbol(hst_field, dev_field, X * Y * sizeof(bool));
 
