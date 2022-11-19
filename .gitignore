@@ -30,3 +30,6 @@
 *.exe
 *.out
 *.app
+Game_Of_Life_CUDA/Game_Of_Life_CUDA/x64/
+Game_Of_Life_CUDA/.vs/
+Game_Of_Life_CUDA/x64/
