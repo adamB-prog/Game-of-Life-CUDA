@@ -16,6 +16,8 @@
 
 __device__ bool dev_field[X][Y];
 
+__device__ bool dev_newField[X][Y];
+
 __device__ int dev_neighbours[X][Y];
 
 __device__ uint8_t dev_image[X * Y * 4];
@@ -29,18 +31,24 @@ uint8_t hst_image[X * Y * 4];
 
 __global__ void ResetNeighbourTable()
 {
+	if (blockIdx.x == 1 && blockIdx.y == 1 && threadIdx.x == 0)
+	{
+		//printf("\nRESET\n");
+	}
 	if (blockIdx.x == 0 && blockIdx.y == 0)
 	{
 		dev_result = 0;
 	}
 	dev_neighbours[blockIdx.x][blockIdx.y] = 0;
+
+	__syncthreads();
 	
 }
 __global__ void CalculateCellNeighbours()
 {
+	
 	__shared__ bool shr_neighbours[3][3];
 
-	__shared__ bool edge;
 	
 	__shared__ uint8_t minX, maxX, minY, maxY;
 
@@ -53,43 +61,44 @@ __global__ void CalculateCellNeighbours()
 	//SETUP
 	if (threadIdx.x == 0 && threadIdx.y == 0)
 	{
-		//std::fill(dev_neighbours, dev_neighbours + X * Y, 0);
-		edge = false;
+		if (blockIdx.x == 1 && blockIdx.y == 1 && threadIdx.x == 0 && threadIdx.y == 0)
+		{
+			//printf("\nCALC\n");
+		}
 
 		if (blockIdx.x == 0)
 		{
 			shr_neighbours[0][0] = 0;
-			shr_neighbours[1][0] = 0;
-			shr_neighbours[2][0] = 0;
-			minX = 1;
-			edge = true;
+			shr_neighbours[0][1] = 0;
+			shr_neighbours[0][2] = 0;
 			
+			minX = 1;
+		
 		}
 		if (blockIdx.y == 0)
 		{
 			shr_neighbours[0][0] = 0;
-			shr_neighbours[0][1] = 0;
-			shr_neighbours[0][2] = 0;
-			edge = true;
+			shr_neighbours[1][0] = 0;
+			shr_neighbours[2][0] = 0;
+			
 			minY = 1;
 		}
 		if (blockIdx.x == X)
 		{
-			shr_neighbours[2][0] = 0;
-			shr_neighbours[2][1] = 0;
+			shr_neighbours[0][2] = 0;
+			shr_neighbours[1][2] = 0;
 			shr_neighbours[2][2] = 0;
-			edge = true;
-			maxY = 1;
+
+			maxX = 1;
 			
 		}
 		if (blockIdx.y == Y)
 		{
-			shr_neighbours[0][2] = 0;
-			shr_neighbours[1][2] = 0;
-			shr_neighbours[2][2] = 0;
-			edge = true;
 			
-			maxX = 1;
+			shr_neighbours[2][0] = 0;
+			shr_neighbours[2][1] = 0;
+			shr_neighbours[2][2] = 0;
+			maxY = 1;
 		}
 
 
@@ -119,19 +128,19 @@ __global__ void CalculateCellNeighbours()
 
 	__syncthreads();
 
-	if (blockIdx.x == 1 && blockIdx.y == 1 && threadIdx.x == 0 && threadIdx.y == 0)
+	/*if (blockIdx.x == 10 && blockIdx.y == 6 && threadIdx.x == 0 && threadIdx.y == 0)
 	{
 		for (size_t i = 0; i < 3; i++)
 		{
 			for (size_t j = 0; j < 3; j++)
 			{
-				printf("%i", dev_neighbours[i][j]);
+				printf("%i", dev_neighbours[blockIdx.x - 1 + i][blockIdx.y - 1 + j]);
 			}
 			printf("\n");
 		}
 
 		printf("---------------\n");
-	}
+	}*/
 
 	
 
@@ -142,26 +151,40 @@ __global__ void SetNewField()
 	__shared__ bool shr_alive; 
 	__shared__ int shr_neighbours;
 	
-	if (threadIdx.x == 0 &&  threadIdx.y == 0)
-	{
-		shr_alive = dev_field[blockIdx.x][blockIdx.y];
-		shr_neighbours = dev_neighbours[blockIdx.x][blockIdx.y];
-	}
-	__syncthreads();
-	if (shr_alive && (shr_neighbours < 1 || shr_neighbours > 3))
-	{
-		dev_field[blockIdx.x][blockIdx.y] = false;
+	
+	
+	shr_alive = dev_field[blockIdx.x][blockIdx.y];
+	shr_neighbours = dev_neighbours[blockIdx.x][blockIdx.y];
 
+	//printf("\n BlockId(%i,%i), alive=%i, neighbours=%i", blockIdx.x, blockIdx.y, shr_alive, shr_neighbours);
+
+	
+	
+	if (shr_alive && (shr_neighbours < 2 || shr_neighbours > 3))
+	{
+
+		//printf("\nexe false %i %i", blockIdx.x, blockIdx.y);
+		dev_newField[blockIdx.x][blockIdx.y] = false;
 	}
 
 	else if (!shr_alive && shr_neighbours == 3)
 	{
-		dev_field[blockIdx.x][blockIdx.y] = true;
+		//printf("\nexe true %i %i", blockIdx.x, blockIdx.y);
+		dev_newField[blockIdx.x][blockIdx.y] = true;
+	}
+
+	else
+	{
+		dev_newField[blockIdx.x][blockIdx.y] = dev_field[blockIdx.x][blockIdx.y];
 	}
 	atomicAdd(&dev_result, dev_field[blockIdx.x][blockIdx.y]);
-	__syncthreads();
+	
 }
 
+__global__ void CopyNewToOld()
+{
+	dev_field[blockIdx.x][blockIdx.y] = dev_newField[blockIdx.x][blockIdx.y];
+}
 
 
 
@@ -219,32 +242,44 @@ int main()
 	GifBegin(&g, filename, width, height, delay);
 
 	hst_field[0][0] = true;
-	hst_field[1][0] = true;
 	hst_field[0][1] = true;
-	hst_field[2][2] = true;
+	hst_field[1][0] = true;
+
+	//spin
+	hst_field[10][5] = true;
+	hst_field[10][6] = true;
+	hst_field[10][7] = true;
 
 
+	//starting field copy
 	cudaMemcpyToSymbol(dev_field, hst_field, X * Y * sizeof(bool));
 
 	
-	for (size_t i = 0; i < 10000; i++)
+	for (size_t i = 0; i < IT; i++)
 	{
 		ResetNeighbourTable << <dim3(X,Y), 1 >> > ();
-		cudaDeviceSynchronize();
+		
+
 		CalculateCellNeighbours << <dim3(X,Y), dim3(3, 3) >> > ();
 
-		cudaDeviceSynchronize();
+		
+
+
 		SetNewField << <dim3(X,Y), 1 >> > ();
 
-		cudaDeviceSynchronize();
+
+		
+		CopyNewToOld << < dim3(X, Y), 1 >> > ();
+		
 		cudaMemcpyFromSymbol(&result, dev_result, sizeof(int));
 		cudaMemcpyFromSymbol(hst_field, dev_field, X * Y * sizeof(bool));
-		if (result > 4)
-		{
-			bool asd = true;
-		}
 
-		printf("%i, trues=%i\n", i, result);
+		//printf("\nIteration: %i, trues=%i\n", i, result);
+		if (result == 0)
+		{
+			break;
+		}
+		
 	}
 
 
@@ -252,7 +287,7 @@ int main()
 
 	
 
-	GifWriteFrame(&g, hst_image, width, height, delay);
+	//GifWriteFrame(&g, hst_image, width, height, delay);
 	//GifWriteFrame(&g, white.data(), width, height, delay);
 	GifEnd(&g);
 
