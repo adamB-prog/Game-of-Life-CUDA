@@ -9,7 +9,7 @@
 #define X 100
 #define Y 200
 #define T 100
-#define IT 500
+#define IT 10
 #define R 3
 #define output "test.gif"
 
@@ -186,53 +186,22 @@ __global__ void CopyNewToOld()
 	dev_field[blockIdx.x][blockIdx.y] = dev_newField[blockIdx.x][blockIdx.y];
 }
 
+__global__ void MakeImage()
+{
+	dev_image[4 * Y * blockIdx.x + blockIdx.y * 4 + 0] = dev_newField[blockIdx.x][blockIdx.y] * 255;
+	dev_image[4 * Y * blockIdx.x + blockIdx.y * 4 + 1] = dev_newField[blockIdx.x][blockIdx.y] * 255;
+	dev_image[4 * Y * blockIdx.x + blockIdx.y * 4 + 2] = dev_newField[blockIdx.x][blockIdx.y] * 255;
+	dev_image[4 * Y * blockIdx.x + blockIdx.y * 4 + 3] = dev_newField[blockIdx.x][blockIdx.y] * 255;
+}
 
 
 int main()
 {
-	int width = X;
-	int height = Y;
+	int width = Y;
+	int height = X;
 
 	int delay = T;
-	/*
-	hst_image[0] = 255;
-	hst_image[1] = 255;
-	hst_image[2] = 255;
-	hst_image[3] = 255;
-	hst_image[4] = 255;
-	hst_image[5] = 255;
-	hst_image[6] = 255;
-	hst_image[7] = 255;
-	hst_image[8] = 255;
-	hst_image[9] = 255;
-	hst_image[10] = 255;
-	hst_image[11] = 255;
-	hst_image[X * 4 + 0] = 255;
-	hst_image[X * 4 + 1] = 255;
-	hst_image[X * 4 + 2] = 255;
-	hst_image[X * 4 + 3] = 255;
-	hst_image[X * 4 + 4] = 255;
-	hst_image[X * 4 + 5] = 255;
-	hst_image[X * 4 + 6] = 255;
-	hst_image[X * 4 + 7] = 255;
-	hst_image[X * 4 + 8] = 255;
-	hst_image[X * 4 + 9] = 255;
-	hst_image[X * 4 + 10] = 255;
-	hst_image[X * 4 + 11] = 255;
-	hst_image[X * 4 * 2 + 0] = 255;
-	hst_image[X * 4 * 2 + 1] = 255;
-	hst_image[X * 4 * 2 + 2] = 255;
-	hst_image[X * 4 * 2 + 3] = 255;
-	hst_image[X * 4 * 2 + 4] = 255;
-	hst_image[X * 4 * 2 + 5] = 255;
-	hst_image[X * 4 * 2 + 6] = 255;
-	hst_image[X * 4 * 2 + 7] = 255;
-	hst_image[X * 4 * 2 + 8] = 255;
-	hst_image[X * 4 * 2 + 9] = 255;
-	hst_image[X * 4 * 2 + 10] = 255;
-	hst_image[X * 4 * 2 + 11] = 255;
 	
-	*/
 	auto filename = output;
 	
 	
@@ -246,9 +215,9 @@ int main()
 	hst_field[1][0] = true;
 
 	//spin
-	hst_field[10][5] = true;
-	hst_field[10][6] = true;
-	hst_field[10][7] = true;
+	hst_field[5][5] = true;
+	hst_field[5][6] = true;
+	hst_field[5][7] = true;
 
 
 	//starting field copy
@@ -266,13 +235,16 @@ int main()
 
 
 		SetNewField << <dim3(X,Y), 1 >> > ();
-
+		MakeImage << <dim3(X, Y), 1 >> > ();
 
 		
 		CopyNewToOld << < dim3(X, Y), 1 >> > ();
 		
 		cudaMemcpyFromSymbol(&result, dev_result, sizeof(int));
 		cudaMemcpyFromSymbol(hst_field, dev_field, X * Y * sizeof(bool));
+
+		cudaMemcpyFromSymbol(hst_image, dev_image, X * Y * 4 * sizeof(uint8_t));
+		GifWriteFrame(&g, hst_image, width, height, delay);
 
 		//printf("\nIteration: %i, trues=%i\n", i, result);
 		if (result == 0)
