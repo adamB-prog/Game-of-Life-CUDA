@@ -6,14 +6,15 @@
 #include <cstdint>
 #include <stdio.h>
 
-#define X 100
-#define Y 200
-#define T 100
-#define IT 10
-#define R 3
+
+//Values
+#define X 1000
+#define Y 2000
+#define T 5
+#define IT 1000
 #define output "test.gif"
 
-
+//Device variables
 __device__ bool dev_field[X][Y];
 
 __device__ bool dev_newField[X][Y];
@@ -24,26 +25,37 @@ __device__ uint8_t dev_image[X * Y * 4];
 
 __device__ int dev_result;
 
+
+//Host variables
 int result = 0;
 
 bool hst_field[X][Y];
 uint8_t hst_image[X * Y * 4];
 
+
+
+/*
+	Reset NeighbourTable with zeros
+	And the living cell counter
+*/
 __global__ void ResetNeighbourTable()
 {
-	if (blockIdx.x == 1 && blockIdx.y == 1 && threadIdx.x == 0)
-	{
-		//printf("\nRESET\n");
-	}
+	
 	if (blockIdx.x == 0 && blockIdx.y == 0)
 	{
 		dev_result = 0;
 	}
 	dev_neighbours[blockIdx.x][blockIdx.y] = 0;
 
-	__syncthreads();
+	
 	
 }
+
+/*
+	Neighbour calculation
+*/
+
+
 __global__ void CalculateCellNeighbours()
 {
 	
@@ -61,10 +73,6 @@ __global__ void CalculateCellNeighbours()
 	//SETUP
 	if (threadIdx.x == 0 && threadIdx.y == 0)
 	{
-		if (blockIdx.x == 1 && blockIdx.y == 1 && threadIdx.x == 0 && threadIdx.y == 0)
-		{
-			//printf("\nCALC\n");
-		}
 
 		if (blockIdx.x == 0)
 		{
@@ -104,48 +112,36 @@ __global__ void CalculateCellNeighbours()
 
 
 	}
-	//LOADING
+
 	__syncthreads();
+	//LOADING
 	if (threadIdx.x >= minX && threadIdx.x <= maxX && threadIdx.y >= minY && threadIdx.y <= maxY)
 	{
 		shr_neighbours[threadIdx.x][threadIdx.y] = dev_field[blockIdx.x - 1 + threadIdx.x][blockIdx.y - 1 + threadIdx.y];
 			
 	}
-	__syncthreads();
+	//__syncthreads();
 
 	//NO SELFREPORT
-	if (threadIdx.x == 0 && threadIdx.y == 0)
+	if (threadIdx.x == 1 && threadIdx.y == 1)
 	{
 		shr_neighbours[1][1] = 0;
 	}
 	
 	
 	
-	__syncthreads();
 
-
+	//SUM NEIGHBOURS(bool true = int 1)
 	atomicAdd(&dev_neighbours[blockIdx.x][blockIdx.y], shr_neighbours[threadIdx.x][threadIdx.y]);
 
-	__syncthreads();
-
-	/*if (blockIdx.x == 10 && blockIdx.y == 6 && threadIdx.x == 0 && threadIdx.y == 0)
-	{
-		for (size_t i = 0; i < 3; i++)
-		{
-			for (size_t j = 0; j < 3; j++)
-			{
-				printf("%i", dev_neighbours[blockIdx.x - 1 + i][blockIdx.y - 1 + j]);
-			}
-			printf("\n");
-		}
-
-		printf("---------------\n");
-	}*/
+	
 
 	
 
 }
-
+/*
+	After Calculating the Neighbours table, then using it by the rules.
+*/
 __global__ void SetNewField()
 {
 	__shared__ bool shr_alive; 
@@ -156,36 +152,41 @@ __global__ void SetNewField()
 	shr_alive = dev_field[blockIdx.x][blockIdx.y];
 	shr_neighbours = dev_neighbours[blockIdx.x][blockIdx.y];
 
-	//printf("\n BlockId(%i,%i), alive=%i, neighbours=%i", blockIdx.x, blockIdx.y, shr_alive, shr_neighbours);
+	
 
 	
-	
+	//Dying condition
 	if (shr_alive && (shr_neighbours < 2 || shr_neighbours > 3))
 	{
-
-		//printf("\nexe false %i %i", blockIdx.x, blockIdx.y);
 		dev_newField[blockIdx.x][blockIdx.y] = false;
 	}
-
+	//Revive condition
 	else if (!shr_alive && shr_neighbours == 3)
 	{
-		//printf("\nexe true %i %i", blockIdx.x, blockIdx.y);
 		dev_newField[blockIdx.x][blockIdx.y] = true;
 	}
-
+	//Otherwise just copy
 	else
 	{
-		dev_newField[blockIdx.x][blockIdx.y] = dev_field[blockIdx.x][blockIdx.y];
+		//dev_newField[blockIdx.x][blockIdx.y] = dev_field[blockIdx.x][blockIdx.y];
+		dev_newField[blockIdx.x][blockIdx.y] = shr_alive;
 	}
-	atomicAdd(&dev_result, dev_field[blockIdx.x][blockIdx.y]);
+	//Counting the living cells
+	//atomicAdd(&dev_result, dev_field[blockIdx.x][blockIdx.y]);
+	atomicAdd(&dev_result, shr_alive);
 	
 }
 
+/*
+	Copy Method
+*/
 __global__ void CopyNewToOld()
 {
 	dev_field[blockIdx.x][blockIdx.y] = dev_newField[blockIdx.x][blockIdx.y];
 }
-
+/*
+	Copy Convert Method
+*/
 __global__ void MakeImage()
 {
 	dev_image[4 * Y * blockIdx.x + blockIdx.y * 4 + 0] = dev_newField[blockIdx.x][blockIdx.y] * 255;
@@ -219,35 +220,37 @@ int main()
 	hst_field[5][6] = true;
 	hst_field[5][7] = true;
 
+	//go
+	hst_field[10][10] = true;
+	hst_field[11][11] = true;
+	hst_field[11][12] = true;
+	hst_field[12][10] = true;
+	hst_field[12][11] = true;
+
 
 	//starting field copy
 	cudaMemcpyToSymbol(dev_field, hst_field, X * Y * sizeof(bool));
-
+	
 	
 	for (size_t i = 0; i < IT; i++)
 	{
 		ResetNeighbourTable << <dim3(X,Y), 1 >> > ();
-		
 
 		CalculateCellNeighbours << <dim3(X,Y), dim3(3, 3) >> > ();
 
-		
-
-
 		SetNewField << <dim3(X,Y), 1 >> > ();
-		MakeImage << <dim3(X, Y), 1 >> > ();
 
+		MakeImage << <dim3(X, Y), 1 >> > ();
 		
 		CopyNewToOld << < dim3(X, Y), 1 >> > ();
 		
 		cudaMemcpyFromSymbol(&result, dev_result, sizeof(int));
-		cudaMemcpyFromSymbol(hst_field, dev_field, X * Y * sizeof(bool));
 
 		cudaMemcpyFromSymbol(hst_image, dev_image, X * Y * 4 * sizeof(uint8_t));
 		GifWriteFrame(&g, hst_image, width, height, delay);
 
-		//printf("\nIteration: %i, trues=%i\n", i, result);
-		if (result == 0)
+		//If there are 2 living cell, then end the simulation.(Because in the next iteration, all of them will die)
+		if (result < 2)
 		{
 			break;
 		}
@@ -259,8 +262,6 @@ int main()
 
 	
 
-	//GifWriteFrame(&g, hst_image, width, height, delay);
-	//GifWriteFrame(&g, white.data(), width, height, delay);
 	GifEnd(&g);
 
 	return 0;
