@@ -23,11 +23,10 @@ __device__ int dev_neighbours[X][Y];
 
 __device__ uint8_t dev_image[X * Y * 4];
 
-//__device__ int dev_result;
 
 
 //Host variables
-//int result = 0;
+
 
 bool hst_field[X][Y];
 uint8_t hst_image[X * Y * 4];
@@ -40,15 +39,7 @@ uint8_t hst_image[X * Y * 4];
 */
 __global__ void ResetNeighbourTable()
 {
-	
-	/*if (blockIdx.x == 0 && blockIdx.y == 0)
-	{
-		dev_result = 0;
-	}*/
 	dev_neighbours[32 * blockIdx.x + threadIdx.x][32 * blockIdx.y + threadIdx.y] = 0;
-
-	
-	
 }
 
 /*
@@ -118,7 +109,6 @@ __global__ void CalculateCellNeighbours()
 	if (threadIdx.x >= minX && threadIdx.x <= maxX && threadIdx.y >= minY && threadIdx.y <= maxY)
 	{
 		shr_neighbours[threadIdx.x][threadIdx.y] = dev_field[blockIdx.x - 1 + threadIdx.x][blockIdx.y - 1 + threadIdx.y];
-			
 	}
 	//__syncthreads();
 
@@ -144,36 +134,35 @@ __global__ void CalculateCellNeighbours()
 */
 __global__ void SetNewField()
 {
-	__shared__ bool shr_alive; 
-	__shared__ int shr_neighbours;
+	__shared__ bool shr_alive[32][32];
+	__shared__ int shr_neighbours[32][32];
 	
 	
 	
-	shr_alive = dev_field[blockIdx.x][blockIdx.y];
-	shr_neighbours = dev_neighbours[blockIdx.x][blockIdx.y];
+	shr_alive[threadIdx.x][threadIdx.y] = dev_field[32 * blockIdx.x + threadIdx.x][32 * blockIdx.y + threadIdx.y];
+	shr_neighbours[threadIdx.x][threadIdx.y] = dev_neighbours[32 * blockIdx.x + threadIdx.x][32 * blockIdx.y + threadIdx.y];
 
 	
 
-	
 	//Dying condition
-	if (shr_alive && (shr_neighbours < 2 || shr_neighbours > 3))
+	if (shr_alive[threadIdx.x][threadIdx.y] && (shr_neighbours[threadIdx.x][threadIdx.y] < 2 || shr_neighbours[threadIdx.x][threadIdx.y] > 3))
 	{
-		dev_newField[blockIdx.x][blockIdx.y] = false;
+		dev_newField[32 * blockIdx.x + threadIdx.x][32 * blockIdx.y + threadIdx.y] = false;
 	}
 	//Revive condition
-	else if (!shr_alive && shr_neighbours == 3)
+	else if (!shr_alive[threadIdx.x][threadIdx.y] && shr_neighbours[threadIdx.x][threadIdx.y] == 3)
 	{
-		dev_newField[blockIdx.x][blockIdx.y] = true;
+
+		dev_newField[32 * blockIdx.x + threadIdx.x][32 * blockIdx.y + threadIdx.y] = true;
 	}
 	//Otherwise just copy
 	else
 	{
 		//dev_newField[blockIdx.x][blockIdx.y] = dev_field[blockIdx.x][blockIdx.y];
-		dev_newField[blockIdx.x][blockIdx.y] = shr_alive;
+		dev_newField[32 * blockIdx.x + threadIdx.x][32 * blockIdx.y + threadIdx.y] = shr_alive[threadIdx.x][threadIdx.y];
 	}
 	//Counting the living cells
-	//atomicAdd(&dev_result, dev_field[blockIdx.x][blockIdx.y]);
-	//atomicAdd(&dev_result, shr_alive);
+	
 	
 }
 
@@ -185,7 +174,6 @@ __global__ void CopyNewToOld()
 	
 	dev_field[32 * blockIdx.x + threadIdx.x][32 * blockIdx.y + threadIdx.y] = dev_newField[32 * blockIdx.x + threadIdx.x][32 * blockIdx.y + threadIdx.y];
 
-	//dev_field[blockIdx.x][blockIdx.y] = dev_newField[blockIdx.x][blockIdx.y];
 }
 /*
 	Copy Convert Method
@@ -241,7 +229,7 @@ int main()
 
 		CalculateCellNeighbours << <dim3(X,Y), dim3(3, 3) >> > ();
 
-		SetNewField << <dim3(X,Y), 1 >> > ();
+		SetNewField << <dim3(X / 32 + 1, Y / 32 + 1), dim3(32, 32) >> > ();
 
 		MakeImage << <dim3(X, Y), 1 >> > ();
 		
@@ -249,7 +237,7 @@ int main()
 		
 
 		cudaMemcpyFromSymbol(hst_image, dev_image, X * Y * 4 * sizeof(uint8_t));
-		//cudaMemcpyFromSymbol(hst_field, dev_field, X * Y * sizeof(bool));
+		cudaMemcpyFromSymbol(hst_field, dev_field, X * Y * sizeof(bool));
 		GifWriteFrame(&g, hst_image, width, height, delay);
 		
 	}
