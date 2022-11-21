@@ -11,7 +11,7 @@
 #define X 1000
 #define Y 2000
 #define T 5
-#define IT 1000
+#define IT 100
 #define output "test.gif"
 
 //Device variables
@@ -23,11 +23,11 @@ __device__ int dev_neighbours[X][Y];
 
 __device__ uint8_t dev_image[X * Y * 4];
 
-__device__ int dev_result;
+//__device__ int dev_result;
 
 
 //Host variables
-int result = 0;
+//int result = 0;
 
 bool hst_field[X][Y];
 uint8_t hst_image[X * Y * 4];
@@ -41,11 +41,11 @@ uint8_t hst_image[X * Y * 4];
 __global__ void ResetNeighbourTable()
 {
 	
-	if (blockIdx.x == 0 && blockIdx.y == 0)
+	/*if (blockIdx.x == 0 && blockIdx.y == 0)
 	{
 		dev_result = 0;
-	}
-	dev_neighbours[blockIdx.x][blockIdx.y] = 0;
+	}*/
+	dev_neighbours[32 * blockIdx.x + threadIdx.x][32 * blockIdx.y + threadIdx.y] = 0;
 
 	
 	
@@ -173,7 +173,7 @@ __global__ void SetNewField()
 	}
 	//Counting the living cells
 	//atomicAdd(&dev_result, dev_field[blockIdx.x][blockIdx.y]);
-	atomicAdd(&dev_result, shr_alive);
+	//atomicAdd(&dev_result, shr_alive);
 	
 }
 
@@ -182,7 +182,10 @@ __global__ void SetNewField()
 */
 __global__ void CopyNewToOld()
 {
-	dev_field[blockIdx.x][blockIdx.y] = dev_newField[blockIdx.x][blockIdx.y];
+	
+	dev_field[32 * blockIdx.x + threadIdx.x][32 * blockIdx.y + threadIdx.y] = dev_newField[32 * blockIdx.x + threadIdx.x][32 * blockIdx.y + threadIdx.y];
+
+	//dev_field[blockIdx.x][blockIdx.y] = dev_newField[blockIdx.x][blockIdx.y];
 }
 /*
 	Copy Convert Method
@@ -234,7 +237,7 @@ int main()
 	
 	for (size_t i = 0; i < IT; i++)
 	{
-		ResetNeighbourTable << <dim3(X,Y), 1 >> > ();
+		ResetNeighbourTable << <dim3(X / 32 + 1, Y / 32 + 1), dim3(32, 32) >> > ();
 
 		CalculateCellNeighbours << <dim3(X,Y), dim3(3, 3) >> > ();
 
@@ -242,18 +245,12 @@ int main()
 
 		MakeImage << <dim3(X, Y), 1 >> > ();
 		
-		CopyNewToOld << < dim3(X, Y), 1 >> > ();
+		CopyNewToOld << < dim3(X / 32 + 1,Y / 32 + 1), dim3(32,32) >> > ();
 		
-		cudaMemcpyFromSymbol(&result, dev_result, sizeof(int));
 
 		cudaMemcpyFromSymbol(hst_image, dev_image, X * Y * 4 * sizeof(uint8_t));
+		//cudaMemcpyFromSymbol(hst_field, dev_field, X * Y * sizeof(bool));
 		GifWriteFrame(&g, hst_image, width, height, delay);
-
-		//If there are 2 living cell, then end the simulation.(Because in the next iteration, all of them will die)
-		if (result < 2)
-		{
-			break;
-		}
 		
 	}
 
